@@ -1,0 +1,86 @@
+{
+  "repo_url": "https://github.com/pallets/click",
+  "description": "Baseline eval questions for pallets/click — a small, well-structured Python CLI library. Questions are designed to test locate, explain, and trace-flow capabilities.",
+  "questions": [
+    {
+      "id": "locate-01",
+      "category": "locate",
+      "question": "Where is the main Click command class defined?",
+      "expected_files": ["src/click/core.py"],
+      "expected_keywords": ["class Command", "BaseCommand"],
+      "notes": "The Command class is the core building block of Click."
+    },
+    {
+      "id": "locate-02",
+      "category": "locate",
+      "question": "Where is the @click.option decorator defined?",
+      "expected_files": ["src/click/decorators.py"],
+      "expected_keywords": ["def option"],
+      "notes": "Should find the option() function in decorators.py."
+    },
+    {
+      "id": "locate-03",
+      "category": "locate",
+      "question": "Where is the echo function defined?",
+      "expected_files": ["src/click/utils.py"],
+      "expected_keywords": ["def echo"],
+      "notes": "click.echo is a commonly used utility."
+    },
+    {
+      "id": "explain-01",
+      "category": "explain",
+      "question": "How does Click handle type conversion for parameters?",
+      "expected_files": ["src/click/types.py"],
+      "expected_keywords": ["ParamType", "convert"],
+      "notes": "Click uses ParamType.convert() to convert string args."
+    },
+    {
+      "id": "explain-02",
+      "category": "explain",
+      "question": "How does Click's Group class organize subcommands?",
+      "expected_files": ["src/click/core.py"],
+      "expected_keywords": ["class Group", "commands", "add_command"],
+      "notes": "Group stores subcommands in a dict-like structure."
+    },
+    {
+      "id": "trace-01",
+      "category": "trace-flow",
+      "question": "What happens when a Click command is invoked? Trace the execution flow from calling a command to it running the callback.",
+      "expected_files": ["src/click/core.py"],
+      "expected_keywords": ["invoke", "main", "callback"],
+      "notes": "Flow: main() -> standalone_mode -> invoke() -> callback()"
+    },
+    {
+      "id": "trace-02",
+      "category": "trace-flow",
+      "question": "How does Click parse command-line arguments? What is the parsing flow?",
+      "expected_files": ["src/click/core.py", "src/click/parser.py"],
+      "expected_keywords": ["parse_args", "OptionParser"],
+      "notes": "Uses its own OptionParser, not argparse."
+    },
+    {
+      "id": "unanswerable-01",
+      "category": "unanswerable",
+      "question": "What database does Click use to store command history?",
+      "expected_files": [],
+      "expected_keywords": [],
+      "notes": "Click does NOT use a database. This is a false-premise question. The system should abstain."
+    },
+    {
+      "id": "unanswerable-02",
+      "category": "unanswerable",
+      "question": "How does Click handle authentication with OAuth2?",
+      "expected_files": [],
+      "expected_keywords": [],
+      "notes": "Click has no OAuth2 support. False premise. Should abstain."
+    },
+    {
+      "id": "unanswerable-03",
+      "category": "unanswerable",
+      "question": "What machine learning model does Click use for auto-completing commands?",
+      "expected_files": [],
+      "expected_keywords": [],
+      "notes": "Click does not use ML. Complete false premise. Must abstain."
+    }
+  ]
+}
