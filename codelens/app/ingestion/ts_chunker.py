@@ -121,7 +121,7 @@ IMPORT_TYPES: dict[str, set[str]] = {
 }
 
 
-# ── Symbol Name Extraction ────────────────────────────────────
+# ── Symbol Name & Type Extraction ─────────────────────────────
 
 def _get_symbol_name(node: Node, language: str) -> str:
     """Extract the symbol name from a definition node.
@@ -130,6 +130,9 @@ def _get_symbol_name(node: Node, language: str) -> str:
         function_definition -> the function name
         class_definition    -> the class name
         decorated_definition -> recurse into the inner definition
+        export_statement    -> recurse into the exported declaration
+        lexical_declaration -> variable name (e.g. const foo = () => {})
+        interface_declaration / type_alias_declaration -> type identifier
 
     Returns empty string if name can't be determined.
     """
@@ -143,18 +146,33 @@ def _get_symbol_name(node: Node, language: str) -> str:
     # For export statements, look at the declaration inside
     if node.type == "export_statement":
         for child in node.children:
-            name = _get_symbol_name(child, language)
-            if name:
-                return name
+            if child.type in (
+                "function_declaration",
+                "class_declaration",
+                "interface_declaration",
+                "type_alias_declaration",
+                "lexical_declaration",
+                "variable_declaration",
+            ):
+                return _get_symbol_name(child, language)
         return ""
 
-    # Look for the 'name' or 'identifier' child
+    # For JS/TS lexical / variable declarations (e.g. const fn = () => {})
+    if node.type in ("lexical_declaration", "variable_declaration"):
+        for child in node.children:
+            if child.type == "variable_declarator":
+                return _get_symbol_name(child, language)
+        return ""
+
+    if node.type == "variable_declarator":
+        for child in node.children:
+            if child.type in ("identifier", "name"):
+                return child.text.decode("utf-8") if child.text else ""
+        return ""
+
+    # Look for name, identifier, property_identifier, or type_identifier child
     for child in node.children:
-        if child.type == "name":          # Python
-            return child.text.decode("utf-8") if child.text else ""
-        if child.type == "identifier":    # JS/TS
-            return child.text.decode("utf-8") if child.text else ""
-        if child.type == "property_identifier":  # JS/TS methods
+        if child.type in ("name", "identifier", "type_identifier", "property_identifier"):
             return child.text.decode("utf-8") if child.text else ""
 
     return ""
@@ -173,9 +191,15 @@ def _get_symbol_type(node: Node, language: str, is_method: bool = False) -> str:
 
     if node.type == "export_statement":
         for child in node.children:
-            st = _get_symbol_type(child, language, is_method)
-            if st:
-                return st
+            if child.type in (
+                "function_declaration",
+                "class_declaration",
+                "interface_declaration",
+                "type_alias_declaration",
+                "lexical_declaration",
+                "variable_declaration",
+            ):
+                return _get_symbol_type(child, language, is_method)
         return "function"
 
     if is_method or node.type == "method_definition":
@@ -189,18 +213,28 @@ def _get_symbol_type(node: Node, language: str, is_method: bool = False) -> str:
         "interface_declaration": "interface",
         "type_alias_declaration": "type",
         "lexical_declaration": "function",  # const x = () => {} is treated as function
+        "variable_declaration": "function",
     }
     return type_map.get(node.type, "function")
 
 
-def _get_class_name(node: Node, language: str) -> str:
-    """If this node is a class definition, return its name."""
+def _find_class_node(node: Node) -> Node | None:
+    """Find the underlying class node, unwrapping decorators or exports."""
     if node.type in ("class_definition", "class_declaration"):
-        return _get_symbol_name(node, language)
-    if node.type == "decorated_definition":
+        return node
+    if node.type in ("decorated_definition", "export_statement"):
         for child in node.children:
-            if child.type in ("class_definition", "class_declaration"):
-                return _get_symbol_name(child, language)
+            unwrapped = _find_class_node(child)
+            if unwrapped is not None:
+                return unwrapped
+    return None
+
+
+def _get_class_name(node: Node, language: str) -> str:
+    """If this node is or contains a class definition, return its name."""
+    cls_node = _find_class_node(node)
+    if cls_node is not None:
+        return _get_symbol_name(cls_node, language)
     return ""
 
 
@@ -236,6 +270,7 @@ def _extract_methods(
     imports_str: str,
     chunk_size: int,
     chunk_overlap: int,
+    outer_node: Node | None = None,
 ) -> list[Chunk]:
     """Extract individual method chunks from a class body.
 
@@ -273,8 +308,9 @@ def _extract_methods(
             methods.append(child)
 
     # Create class header chunk (signature + docstring + class vars)
-    header_end = first_method_line if first_method_line is not None else class_node.end_point[0] + 1
-    header_start = class_node.start_point[0]  # 0-indexed
+    base_node = outer_node if outer_node is not None else class_node
+    header_end = first_method_line if first_method_line is not None else base_node.end_point[0] + 1
+    header_start = base_node.start_point[0]  # 0-indexed
 
     if header_end > header_start:
         raw = "".join(source_lines[header_start:header_end])
@@ -470,29 +506,32 @@ def chunk_file_treesitter(
     def_types = DEFINITION_TYPES.get(language, set())
 
     chunks: list[Chunk] = []
-    module_level_ranges: list[tuple[int, int]] = []  # Ranges of non-definition top-level code
+    current_module_ranges: list[tuple[int, int]] = []  # Contiguous non-definition top-level ranges
+
+    def flush_module_chunk() -> None:
+        nonlocal current_module_ranges
+        if current_module_ranges:
+            _add_module_chunk(
+                current_module_ranges, source_lines, rel_path, language,
+                imports_str, chunk_size, chunk_overlap, chunks,
+            )
+            current_module_ranges = []
 
     for child in root.children:
-        # Skip import statements (already extracted)
-        if child.type in IMPORT_TYPES.get(language, set()):
-            # Still include imports in module-level chunk
-            module_level_ranges.append((child.start_point[0], child.end_point[0] + 1))
-            continue
-
-        # Skip comments (but include in module-level chunk)
-        if child.type == "comment":
-            module_level_ranges.append((child.start_point[0], child.end_point[0] + 1))
-            continue
-
-        # Is this a definition?
+        # Is this a top-level definition?
         if child.type in def_types:
+            # Flush any module code accumulated before this definition
+            flush_module_chunk()
+
             class_name = _get_class_name(child, language)
 
             if class_name:
+                cls_node = _find_class_node(child)
                 # It's a class — extract methods separately
                 method_chunks = _extract_methods(
-                    child, class_name, language, source_lines,
+                    cls_node or child, class_name, language, source_lines,
                     rel_path, imports_str, chunk_size, chunk_overlap,
+                    outer_node=child,
                 )
                 if method_chunks:
                     chunks.extend(method_chunks)
@@ -503,21 +542,17 @@ def chunk_file_treesitter(
                         imports_str, chunk_size, chunk_overlap, chunks,
                     )
             else:
-                # It's a function/other definition
+                # It's a function/interface/type/variable definition
                 _add_definition_chunk(
                     child, source_lines, rel_path, language,
                     imports_str, chunk_size, chunk_overlap, chunks,
                 )
         else:
-            # Module-level code (constants, expressions, etc.)
-            module_level_ranges.append((child.start_point[0], child.end_point[0] + 1))
+            # Module-level code (imports, comments, constants, expressions)
+            current_module_ranges.append((child.start_point[0], child.end_point[0] + 1))
 
-    # Create a single "module" chunk for all module-level code
-    if module_level_ranges:
-        _add_module_chunk(
-            module_level_ranges, source_lines, rel_path, language,
-            imports_str, chunk_size, chunk_overlap, chunks,
-        )
+    # Flush any remaining module code at the end of the file
+    flush_module_chunk()
 
     logger.debug(
         "Tree-sitter chunked %s: %d chunks (%d imports)",

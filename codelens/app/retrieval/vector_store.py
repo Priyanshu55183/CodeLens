@@ -45,11 +45,18 @@ class RetrievedChunk:
     start_line: int
     end_line: int
     language: str
-    distance: float          # Lower = more similar (L2 distance in ChromaDB)
+    distance: float          # Lower = more similar (cosine distance in ChromaDB)
+    symbol_name: str = ""
+    symbol_type: str = ""
+    parent_class: str = ""
+    imports: str = ""
 
     @property
     def citation(self) -> str:
         """Format as a citation string: [file_path:start-end]"""
+        if self.symbol_name:
+            symbol = f" ({self.parent_class}.{self.symbol_name})" if self.parent_class else f" ({self.symbol_name})"
+            return f"[{self.file_path}:{self.start_line}-{self.end_line}{symbol}]"
         return f"[{self.file_path}:{self.start_line}-{self.end_line}]"
 
 
@@ -180,11 +187,15 @@ class VectorStore:
             chunks.append(RetrievedChunk(
                 chunk_id=chunk_id,
                 content=doc,
-                file_path=meta["file_path"],
-                start_line=meta["start_line"],
-                end_line=meta["end_line"],
-                language=meta["language"],
+                file_path=meta.get("file_path", ""),
+                start_line=meta.get("start_line", 0),
+                end_line=meta.get("end_line", 0),
+                language=meta.get("language", ""),
                 distance=dist,
+                symbol_name=meta.get("symbol_name", ""),
+                symbol_type=meta.get("symbol_type", ""),
+                parent_class=meta.get("parent_class", ""),
+                imports=meta.get("imports", ""),
             ))
 
         logger.info("Query returned %d results", len(chunks))

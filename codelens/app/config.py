@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # ── Chunker ───────────────────────────────────────────────
     chunk_size_lines: int = 80             # Lines per chunk
     chunk_overlap_lines: int = 10          # Overlap between chunks
+    use_treesitter: bool = True            # Use tree-sitter syntax-aware chunking (Phase 2)
 
     # ── Retrieval ─────────────────────────────────────────────
     top_k: int = 10                        # Number of chunks to retrieve

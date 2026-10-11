@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from codelens.app.config import Settings
 from codelens.app.ingestion.cloner import clone_repo, parse_github_url
 from codelens.app.ingestion.filters import collect_files
-from codelens.app.ingestion.chunker import chunk_all_files, Chunk
+from codelens.app.ingestion.chunker import chunk_all_files, chunk_all_files_smart, Chunk
 from codelens.app.retrieval.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def index_repo(url: str, settings: Settings) -> IndexResult:
     Steps:
         1. Clone the repo (or reuse existing clone)
         2. Collect files (skip junk)
-        3. Chunk all files
+        3. Chunk all files (tree-sitter syntax-aware or sliding-window fallback)
         4. Embed and store in ChromaDB
 
     Args:
@@ -64,10 +64,15 @@ def index_repo(url: str, settings: Settings) -> IndexResult:
     files = collect_files(repo_dir)
     logger.info("Step 2/4: Collected %d files", len(files))
 
-    # Step 3: Chunk
-    chunks = chunk_all_files(
-        files, repo_dir, settings.chunk_size_lines, settings.chunk_overlap_lines
-    )
+    # Step 3: Chunk (tree-sitter smart chunking when enabled, sliding-window fallback)
+    if getattr(settings, "use_treesitter", True):
+        chunks = chunk_all_files_smart(
+            files, repo_dir, settings.chunk_size_lines, settings.chunk_overlap_lines
+        )
+    else:
+        chunks = chunk_all_files(
+            files, repo_dir, settings.chunk_size_lines, settings.chunk_overlap_lines
+        )
     logger.info("Step 3/4: Created %d chunks", len(chunks))
 
     # Step 4: Embed and store
