@@ -32,6 +32,7 @@ from codelens.app.retrieval import (
     VectorStore,
     BM25Index,
     HybridRetriever,
+    SymbolFinder,
     RetrievedChunk,
 )
 from codelens.app.llm_client import ask_llm
@@ -164,6 +165,75 @@ def cmd_ask(args: argparse.Namespace) -> None:
     ))
 
 
+def cmd_find(args: argparse.Namespace) -> None:
+    """Handle the 'find' command — look up a symbol definition by name."""
+    settings = get_settings()
+    owner, repo_name = parse_github_url(args.repo_url)
+
+    symbol = args.symbol
+    symbol_type = getattr(args, "type", None) or None
+    fuzzy = not getattr(args, "exact", False)
+
+    console.print(
+        f"\n[bold blue]Finding symbol:[/bold blue] [bold]{symbol}[/bold]"
+        + (f" [dim](type: {symbol_type})[/dim]" if symbol_type else "")
+        + (" [dim](exact)[/dim]" if not fuzzy else "")
+        + "\n"
+    )
+
+    vector_store = VectorStore(
+        chroma_dir=settings.chroma_dir,
+        api_key=settings.openai_api_key,
+        embedding_model=settings.embedding_model,
+    )
+    bm25_index = BM25Index(bm25_dir=settings.bm25_dir)
+    finder = SymbolFinder(vector_store=vector_store, bm25_index=bm25_index)
+
+    results = finder.find(
+        owner=owner,
+        repo=repo_name,
+        symbol_name=symbol,
+        symbol_type=symbol_type,
+        top_k=settings.top_k,
+        fuzzy=fuzzy,
+    )
+
+    if not results:
+        console.print("[yellow]No matching symbols found. Did you index the repo first?[/yellow]")
+        return
+
+    console.print(f"[dim]Found {len(results)} definition(s):[/dim]\n")
+
+    from rich.syntax import Syntax
+
+    for i, chunk in enumerate(results, 1):
+        # Build a rich header line
+        kind = chunk.symbol_type or "symbol"
+        parent = f"[dim]{chunk.parent_class}.[/dim]" if chunk.parent_class else ""
+        title = (
+            f"  {i}. [cyan]{kind}[/cyan] {parent}[bold]{chunk.symbol_name}[/bold] "
+            f"[dim]— {chunk.citation}[/dim]"
+        )
+        console.print(title)
+
+        # Show the code with syntax highlighting (first 20 lines only for readability)
+        code_lines = chunk.content.splitlines()
+        preview = "\n".join(code_lines[:20])
+        if len(code_lines) > 20:
+            preview += f"\n[dim]... ({len(code_lines) - 20} more lines)[/dim]"
+
+        syntax = Syntax(
+            preview,
+            chunk.language or "text",
+            theme="monokai",
+            line_numbers=True,
+            start_line=chunk.start_line,
+            word_wrap=False,
+        )
+        console.print(Panel(syntax, border_style="dim"))
+        console.print()
+
+
 def main() -> None:
     """Entry point for the CLI."""
     parser = argparse.ArgumentParser(
@@ -187,6 +257,24 @@ def main() -> None:
         help="Retrieval strategy: hybrid (default), vector, or bm25",
     )
 
+    # find command
+    find_parser = subparsers.add_parser("find", help="Find a symbol definition by name")
+    find_parser.add_argument("repo_url", help="GitHub repository URL")
+    find_parser.add_argument("symbol", help="Symbol name to find (function, class, method)")
+    find_parser.add_argument(
+        "--type",
+        dest="type",
+        choices=["function", "class", "method", "interface", "type"],
+        default=None,
+        help="Restrict search to a specific symbol type",
+    )
+    find_parser.add_argument(
+        "--exact",
+        action="store_true",
+        default=False,
+        help="Only return exact name matches (no substring/fuzzy matching)",
+    )
+
     args = parser.parse_args()
 
     # Setup logging
@@ -200,6 +288,8 @@ def main() -> None:
         cmd_index(args)
     elif args.command == "ask":
         cmd_ask(args)
+    elif args.command == "find":
+        cmd_find(args)
 
 
 if __name__ == "__main__":
