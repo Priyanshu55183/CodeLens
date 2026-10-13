@@ -7,12 +7,16 @@ pydantic>=2.5.0
 rich>=13.7.0
 pytest>=7.4.0
 
-# Phase 2+: Will be needed later
+# Phase 2: Syntax-aware chunking
+tree-sitter>=0.21.0
+
+# Phase 3: Hybrid retrieval
+rank-bm25>=0.2.2
+
+# Phase 4+: Will be needed later
 # anthropic>=0.8.0
 # google-generativeai>=0.3.0
-# rank-bm25>=0.2.2
 # sentence-transformers>=2.2.2
-# tree-sitter>=0.21.0
 # fastapi>=0.104.0
 # uvicorn>=0.24.0
 # streamlit>=1.28.0

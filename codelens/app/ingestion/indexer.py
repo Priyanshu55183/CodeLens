@@ -19,6 +19,7 @@ from codelens.app.ingestion.cloner import clone_repo, parse_github_url
 from codelens.app.ingestion.filters import collect_files
 from codelens.app.ingestion.chunker import chunk_all_files, chunk_all_files_smart, Chunk
 from codelens.app.retrieval.vector_store import VectorStore
+from codelens.app.retrieval.bm25 import BM25Index
 
 logger = logging.getLogger(__name__)
 
@@ -75,14 +76,19 @@ def index_repo(url: str, settings: Settings) -> IndexResult:
         )
     logger.info("Step 3/4: Created %d chunks", len(chunks))
 
-    # Step 4: Embed and store
+    # Step 4: Embed and store in ChromaDB (Dense)
     store = VectorStore(
         chroma_dir=settings.chroma_dir,
         api_key=settings.openai_api_key,
         embedding_model=settings.embedding_model,
     )
     store.add_chunks(owner, repo_name, chunks)
-    logger.info("Step 4/4: Stored in ChromaDB")
+    logger.info("Step 4/5: Stored in ChromaDB")
+
+    # Step 5: Index in BM25 (Sparse keyword)
+    bm25 = BM25Index(bm25_dir=settings.bm25_dir)
+    bm25.add_chunks(owner, repo_name, chunks)
+    logger.info("Step 5/5: Stored in BM25 index")
 
     duration = time.time() - start_time
     return IndexResult(

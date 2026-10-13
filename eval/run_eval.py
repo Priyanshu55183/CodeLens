@@ -27,7 +27,7 @@ from rich.table import Table
 
 from codelens.app.config import get_settings
 from codelens.app.ingestion.cloner import parse_github_url
-from codelens.app.retrieval.vector_store import VectorStore, RetrievedChunk
+from codelens.app.retrieval import VectorStore, BM25Index, HybridRetriever, RetrievedChunk
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -54,6 +54,7 @@ def evaluate_retrieval(
     repo_url: str,
     questions_file: Path = QUESTIONS_FILE,
     top_k: int = 10,
+    mode: str = "hybrid",
 ) -> list[QuestionResult]:
     """Run retrieval evaluation on all questions.
 
@@ -61,6 +62,7 @@ def evaluate_retrieval(
         repo_url: The indexed repo URL.
         questions_file: Path to questions.json.
         top_k: Number of chunks to retrieve.
+        mode: Retrieval mode ("hybrid", "vector", "bm25").
 
     Returns:
         List of QuestionResult objects.
@@ -68,10 +70,19 @@ def evaluate_retrieval(
     settings = get_settings()
     owner, repo_name = parse_github_url(repo_url)
 
-    store = VectorStore(
+    vector_store = VectorStore(
         chroma_dir=settings.chroma_dir,
         api_key=settings.openai_api_key,
         embedding_model=settings.embedding_model,
+    )
+    bm25_index = BM25Index(bm25_dir=settings.bm25_dir)
+    retriever = HybridRetriever(
+        vector_store=vector_store,
+        bm25_index=bm25_index,
+        default_mode=settings.retrieval_mode,
+        rrf_k=settings.rrf_k,
+        dense_weight=settings.dense_weight,
+        bm25_weight=settings.bm25_weight,
     )
 
     with open(questions_file) as f:
@@ -92,8 +103,8 @@ def evaluate_retrieval(
             results.append(qr)
             continue
 
-        # Run vector search
-        chunks = store.query(owner, repo_name, q["question"], top_k=top_k)
+        # Run retrieval search
+        chunks = retriever.query(owner, repo_name, q["question"], top_k=top_k, mode=mode)
         qr.retrieved_files = [c.file_path for c in chunks]
 
         # Check hits
@@ -161,19 +172,25 @@ def main() -> None:
     """Run the evaluation."""
     parser = argparse.ArgumentParser(description="Run CodeLens retrieval evaluation")
     parser.add_argument("--repo-url", required=True, help="GitHub repo URL (must be indexed)")
+    parser.add_argument(
+        "--mode",
+        choices=["hybrid", "vector", "bm25"],
+        default="hybrid",
+        help="Retrieval strategy: hybrid (default), vector, or bm25",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-    console.print(f"\n[bold blue]Running evaluation for:[/bold blue] {args.repo_url}\n")
+    console.print(f"\n[bold blue]Running {args.mode.upper()} retrieval evaluation for:[/bold blue] {args.repo_url}\n")
 
-    results = evaluate_retrieval(args.repo_url)
+    results = evaluate_retrieval(args.repo_url, mode=args.mode)
     print_results(results)
 
     # Save results to JSON
     results_dir = EVAL_DIR / "results"
     results_dir.mkdir(exist_ok=True)
-    output_file = results_dir / "phase1_baseline.json"
+    output_file = results_dir / f"{args.mode}_retrieval.json"
     with open(output_file, "w") as f:
         json.dump(
             [

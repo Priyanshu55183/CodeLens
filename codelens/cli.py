@@ -28,7 +28,12 @@ from rich.markdown import Markdown
 from codelens.app.config import get_settings
 from codelens.app.ingestion.cloner import parse_github_url
 from codelens.app.ingestion.indexer import index_repo
-from codelens.app.retrieval.vector_store import VectorStore, RetrievedChunk
+from codelens.app.retrieval import (
+    VectorStore,
+    BM25Index,
+    HybridRetriever,
+    RetrievedChunk,
+)
 from codelens.app.llm_client import ask_llm
 
 console = Console()
@@ -109,22 +114,32 @@ def cmd_ask(args: argparse.Namespace) -> None:
 
     console.print(f"\n[bold blue]Question:[/bold blue] {args.question}\n")
 
-    # Step 1: Retrieve relevant chunks
-    store = VectorStore(
+    # Step 1: Retrieve relevant chunks (Hybrid dense + sparse)
+    mode = getattr(args, "mode", None) or settings.retrieval_mode
+    vector_store = VectorStore(
         chroma_dir=settings.chroma_dir,
         api_key=settings.openai_api_key,
         embedding_model=settings.embedding_model,
     )
-    chunks = store.query(owner, repo_name, args.question, top_k=settings.top_k)
+    bm25_index = BM25Index(bm25_dir=settings.bm25_dir)
+    retriever = HybridRetriever(
+        vector_store=vector_store,
+        bm25_index=bm25_index,
+        default_mode=settings.retrieval_mode,
+        rrf_k=settings.rrf_k,
+        dense_weight=settings.dense_weight,
+        bm25_weight=settings.bm25_weight,
+    )
+    chunks = retriever.query(owner, repo_name, args.question, top_k=settings.top_k, mode=mode)
 
     if not chunks:
         console.print("[yellow]No indexed data found. Run 'index' first.[/yellow]")
         return
 
     # Show retrieved sources
-    console.print(f"[dim]Retrieved {len(chunks)} code snippets[/dim]\n")
+    console.print(f"[dim]Retrieved {len(chunks)} code snippets (mode: {mode})[/dim]\n")
     for i, chunk in enumerate(chunks, 1):
-        console.print(f"  [dim]{i}. {chunk.citation} (distance: {chunk.distance:.4f})[/dim]")
+        console.print(f"  [dim]{i}. {chunk.citation} (score/dist: {chunk.distance:.4f})[/dim]")
     console.print()
 
     # Step 2: Build prompt and ask LLM
@@ -165,6 +180,12 @@ def main() -> None:
     ask_parser = subparsers.add_parser("ask", help="Ask a question about a repo")
     ask_parser.add_argument("repo_url", help="GitHub repository URL")
     ask_parser.add_argument("question", help="Your question about the codebase")
+    ask_parser.add_argument(
+        "--mode",
+        choices=["hybrid", "vector", "bm25"],
+        default=None,
+        help="Retrieval strategy: hybrid (default), vector, or bm25",
+    )
 
     args = parser.parse_args()
 

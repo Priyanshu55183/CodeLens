@@ -41,6 +41,10 @@ class Settings(BaseSettings):
 
     # ── Retrieval ─────────────────────────────────────────────
     top_k: int = 10                        # Number of chunks to retrieve
+    retrieval_mode: str = "hybrid"         # "hybrid" | "vector" | "bm25" (Phase 3)
+    rrf_k: int = 60                        # RRF smoothing constant
+    dense_weight: float = 1.0              # Relative weight for dense vector search
+    bm25_weight: float = 1.0               # Relative weight for sparse BM25 search
 
     model_config = {
         "env_file": ".env",
@@ -57,6 +61,11 @@ class Settings(BaseSettings):
     def chroma_dir(self) -> Path:
         """Directory where ChromaDB persists data."""
         return self.data_dir / "chroma"
+
+    @property
+    def bm25_dir(self) -> Path:
+        """Directory where BM25 index files are stored."""
+        return self.data_dir / "bm25"
 
 
 def get_settings() -> Settings:
