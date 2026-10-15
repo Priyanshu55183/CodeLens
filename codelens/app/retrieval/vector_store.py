@@ -201,6 +201,22 @@ class VectorStore:
         logger.info("Query returned %d results", len(chunks))
         return chunks
 
+    def count(self, owner: str, repo: str) -> int:
+        """Return the number of indexed chunks for a repo.
+
+        Returns 0 if the collection does not exist yet (repo not indexed).
+        """
+        name = self._collection_name(owner, repo)
+        try:
+            collection = self.client.get_collection(
+                name=name,
+                embedding_function=self.embedding_fn,
+            )
+            return collection.count()
+        except Exception:
+            # Collection doesn't exist — repo not indexed
+            return 0
+
     def delete_collection(self, owner: str, repo: str) -> None:
         """Delete a repo's collection (for re-indexing from scratch)."""
         name = self._collection_name(owner, repo)

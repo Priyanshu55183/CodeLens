@@ -4,6 +4,7 @@ chromadb>=0.4.18
 openai>=1.6.0
 python-dotenv>=1.0.0
 pydantic>=2.5.0
+pydantic-settings>=2.0.0
 rich>=13.7.0
 pytest>=7.4.0
 
@@ -13,11 +14,14 @@ tree-sitter>=0.21.0
 # Phase 3: Hybrid retrieval
 rank-bm25>=0.2.2
 
-# Phase 4+: Will be needed later
-# anthropic>=0.8.0
-# google-generativeai>=0.3.0
-# sentence-transformers>=2.2.2
-# fastapi>=0.104.0
-# uvicorn>=0.24.0
+# Phase 5: Multi-LLM provider support
+anthropic>=0.8.0
+google-generativeai>=0.3.0
+
+# Phase 6: REST API
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Phase 6+: Will be needed later
 # streamlit>=1.28.0
 # langfuse>=2.0.0

@@ -8,6 +8,7 @@ We use pydantic's BaseSettings for automatic env var parsing and validation.
 
 from pathlib import Path
 from pydantic_settings import BaseSettings
+from codelens.app.llm_client import PROVIDER_DEFAULTS
 
 
 class Settings(BaseSettings):
@@ -66,6 +67,27 @@ class Settings(BaseSettings):
     def bm25_dir(self) -> Path:
         """Directory where BM25 index files are stored."""
         return self.data_dir / "bm25"
+
+    @property
+    def active_api_key(self) -> str:
+        """Return the API key for the currently configured LLM provider.
+
+        This means the CLI never needs a switch statement — it always calls
+        settings.active_api_key regardless of which provider is set.
+        """
+        mapping = {
+            "openai": self.openai_api_key,
+            "anthropic": self.anthropic_api_key,
+            "gemini": self.gemini_api_key,
+        }
+        return mapping.get(self.llm_provider, "")
+
+    @property
+    def resolved_llm_model(self) -> str:
+        """Return the configured model, falling back to the provider's default."""
+        if self.llm_model:
+            return self.llm_model
+        return PROVIDER_DEFAULTS.get(self.llm_provider, "")
 
 
 def get_settings() -> Settings:

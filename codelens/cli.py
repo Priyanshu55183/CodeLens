@@ -1,20 +1,21 @@
 """
 CodeLens CLI — index a repo and ask questions from the command line.
 
-This is the main entry point for Phase 1. It provides two commands:
-  1. `python -m codelens.cli index <repo_url>` — clone, chunk, embed
-  2. `python -m codelens.cli ask <repo_url> "<question>"` — search + answer
+Commands:
+  index  <repo_url>              — clone, chunk, embed a repo
+  ask    <repo_url> <question>   — hybrid search + LLM answer
+  find   <repo_url> <symbol>     — look up a symbol definition
+  serve                          — start the FastAPI REST API server (Phase 6)
 
 Design decision: We use argparse (stdlib) instead of click/typer because
-it's zero-dependency and we only have 2 commands. We'll move to FastAPI
-for the real API in Phase 9.
+it's zero-dependency and we only have a few commands. The real API surface
+is the FastAPI server started with the 'serve' command.
 
 The ask flow:
-  1. Vector search for top-K relevant chunks
+  1. Hybrid retrieval (dense + BM25 + RRF) for top-K relevant chunks
   2. Build a prompt with the chunks as context
   3. Send to LLM with a system prompt that enforces grounded answers
-  4. Print the answer with citations
-"""
+  4. Print the answer with citations"""
 
 import argparse
 import logging
@@ -152,8 +153,8 @@ def cmd_ask(args: argparse.Namespace) -> None:
         prompt=prompt,
         system_prompt=SYSTEM_PROMPT,
         provider=settings.llm_provider,
-        model=settings.llm_model,
-        api_key=settings.openai_api_key,
+        model=settings.resolved_llm_model,
+        api_key=settings.active_api_key,
         temperature=0.0,
     )
 
@@ -234,6 +235,39 @@ def cmd_find(args: argparse.Namespace) -> None:
         console.print()
 
 
+def cmd_serve(args: argparse.Namespace) -> None:
+    """Handle the 'serve' command — start the FastAPI REST API server."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print(
+            "[red]Error:[/red] uvicorn is required to run the server.\n"
+            "Install it with: [bold]pip install uvicorn[/bold]"
+        )
+        return
+
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 8000)
+    reload = getattr(args, "reload", False)
+
+    console.print(Panel(
+        f"[bold green]CodeLens API[/bold green]\n"
+        f"  Docs:  [link=http://{host}:{port}/docs]http://{host}:{port}/docs[/link]\n"
+        f"  ReDoc: [link=http://{host}:{port}/redoc]http://{host}:{port}/redoc[/link]\n"
+        f"  Health:[link=http://{host}:{port}/health]http://{host}:{port}/health[/link]",
+        title="Starting Server",
+        border_style="blue",
+    ))
+
+    uvicorn.run(
+        "codelens.app.api.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+    )
+
+
 def main() -> None:
     """Entry point for the CLI."""
     parser = argparse.ArgumentParser(
@@ -275,6 +309,26 @@ def main() -> None:
         help="Only return exact name matches (no substring/fuzzy matching)",
     )
 
+    # serve command (Phase 6)
+    serve_parser = subparsers.add_parser("serve", help="Start the FastAPI REST API server")
+    serve_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind to (default: 127.0.0.1)",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to listen on (default: 8000)",
+    )
+    serve_parser.add_argument(
+        "--reload",
+        action="store_true",
+        default=False,
+        help="Enable auto-reload for development",
+    )
+
     args = parser.parse_args()
 
     # Setup logging
@@ -290,6 +344,8 @@ def main() -> None:
         cmd_ask(args)
     elif args.command == "find":
         cmd_find(args)
+    elif args.command == "serve":
+        cmd_serve(args)
 
 
 if __name__ == "__main__":
